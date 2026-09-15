@@ -2,32 +2,39 @@ name: CI/CD Backend Django
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
+
   pull_request:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
+
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
           version: latest
           virtualenvs-create: true
           virtualenvs-in-project: true
+
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
+
       - name: Lint (flake8)
         run: poetry run pip install flake8 && poetry run flake8 . --max-line-length=120 --exclude=migrations,.venv
 
   test:
     needs: lint
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -42,6 +49,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+
     env:
       DJANGO_SECRET_KEY: ci-test-secret-key
       DJANGO_DEBUG: "False"
@@ -51,27 +59,34 @@ jobs:
       POSTGRES_PASSWORD: lacrei_saude
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
+
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
           version: latest
           virtualenvs-create: true
           virtualenvs-in-project: true
+
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
+
       - name: Run Tests
         run: poetry run python manage.py test
 
   build:
     needs: test
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Build Docker image
         run: docker build -t lacrei-saude-api:${{ github.sha }} .
 
@@ -80,7 +95,21 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Deploy
-        run: echo "Aqui entra o passo real de deploy (ex. AWS Elastic Beanstalk / ECS). Ver DEPLOY.md."
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Deploy para Elastic Beanstalk
+        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
+        with:
+          aws-region: us-east-2
+          application-name: desafio-backend-lacrei
+          environment-name: desafio-backend-lacrei-production
