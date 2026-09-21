@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,9 +22,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# Nunca hardcode a secret key. Em dev, se SECRET_KEY não estiver definida,
-# cai num valor óbvio de desenvolvimento (nunca use isso em produção).
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key")
+# Nunca hardcode a secret key e nunca use um valor padrão inseguro: se a
+# variável de ambiente não existir, a aplicação deve falhar ao subir em vez
+# de rodar com uma chave insegura conhecida.
+try:
+    SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+except KeyError:
+    raise ImproperlyConfigured(
+        "A variável de ambiente DJANGO_SECRET_KEY é obrigatória e não foi definida."
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
@@ -48,6 +55,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'drf_spectacular',
     'profissionais',
     'corsheaders',
 ]
@@ -87,12 +95,21 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+def _require_env(name):
+    try:
+        return os.environ[name]
+    except KeyError:
+        raise ImproperlyConfigured(
+            f"A variável de ambiente {name} é obrigatória e não foi definida."
+        )
+
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB', 'lacrei_saude'),
-        'USER': os.environ.get('POSTGRES_USER', 'lacrei_saude'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'lacrei_saude'),
+        'NAME': _require_env('POSTGRES_DB'),
+        'USER': _require_env('POSTGRES_USER'),
+        'PASSWORD': _require_env('POSTGRES_PASSWORD'),
         'HOST': os.environ.get('POSTGRES_HOST', 'db'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }
@@ -157,6 +174,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Lacrei Saúde - API de Gerenciamento de Consultas Médicas',
+    'DESCRIPTION': 'API RESTful para cadastro de profissionais de saúde e agendamento de consultas.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
 }
 
 

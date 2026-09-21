@@ -42,7 +42,7 @@ poetry run python manage.py runserver
 poetry run python manage.py test
 ```
 
-Os testes usam `APITestCase` e cobrem CRUD de profissionais, CRUD de consultas e casos de erro (dados ausentes, referência a profissional inexistente).
+Os testes usam `APITestCase` e cobrem: CRUD de profissionais, CRUD de consultas, casos de erro (dados ausentes, referência a profissional inexistente), busca de consultas por profissional (com e sem resultados), detalhe de consulta por ID (existente e inexistente), acesso sem autenticação (rotas públicas e bloqueadas), autenticação via JWT real (obtendo o token em `/api/token/`), validação de contato inválido e bloqueio de consulta para profissional inativo.
 
 ## Autenticação (JWT)
 
@@ -66,6 +66,16 @@ Rotas protegidas: envie `Authorization: Bearer <token_de_acesso>` no header.
 * `GET /api/consultas/?profissional=<id>` — busca consultas por profissional
 * `POST /api/consultas/` — agenda consulta (requer autenticação)
 
+## Documentação da API
+
+Com o servidor rodando, a documentação interativa fica disponível em:
+
+* **Swagger UI:** `/api/docs/`
+* **Redoc:** `/api/redoc/`
+* **Schema OpenAPI (JSON/YAML):** `/api/schema/`
+
+Gerada automaticamente a partir dos serializers e views com `drf-spectacular`.
+
 ## CI/CD
 
 O pipeline (`.github/workflows/ci-cd.yml`) roda em cada push/PR para `main`/`master` com 4 etapas: **lint** (flake8) → **testes** (contra um PostgreSQL de serviço) → **build** (imagem Docker) → **deploy** (apenas na branch `main`).
@@ -76,7 +86,22 @@ Ver [DEPLOY.md](./DEPLOY.md) para a estratégia de deploy em staging/produção 
 
 ## Decisões técnicas
 
-* **PostgreSQL via variáveis de ambiente**: nenhuma credencial fica hardcoded; tudo vem de `.env` (local/Docker) ou de secrets do CI.
+* **PostgreSQL via variáveis de ambiente**: nenhuma credencial fica hardcoded; tudo vem de `.env` (local/Docker) ou de secrets do CI. `DJANGO_SECRET_KEY`, `POSTGRES_DB`, `POSTGRES_USER` e `POSTGRES_PASSWORD` são obrigatórias — se alguma não estiver definida, a aplicação falha ao subir em vez de usar um valor padrão inseguro.
 * **JWT (SimpleJWT)** como mecanismo de autenticação por ser stateless e adequado a uma API consumida por outros serviços da Lacrei Saúde.
 * **CORS restrito por variável de ambiente** (`CORS_ALLOWED_ORIGINS`), nunca `*`.
 * **Logging** configurado em `core/settings.py`: logs de acesso em `logs/access.log` e de erro em `logs/error.log`, além de saída no console (útil em containers).
+* **Validações nos serializers**: nome social e endereço com tamanho mínimo, contato validado como telefone (DDD + número) ou e-mail, registro de conselho obrigatório, e bloqueio de agendamento de consulta para profissional inativo.
+* **Documentação da API via drf-spectacular**, gerada a partir do código (serializers/views), evitando divergência entre documentação e implementação.
+
+## Problemas encontrados e como foram resolvidos
+
+* **Estrutura de pastas duplicada no repositório**: um `git init` feito na pasta errada deixou todo o projeto aninhado uma pasta abaixo da raiz do repositório, o que quebrava o `docker build` e o `poetry install` no CI (não encontravam `Dockerfile`/`pyproject.toml` na raiz esperada). Corrigido movendo todo o conteúdo para a raiz do repositório.
+* **Health check falhando na AWS (`Target.FailedHealthChecks`)**: o Elastic Beanstalk (plataforma Docker) espera a aplicação respondendo na porta 80 da instância, mas o `docker-compose.yml` só expunha a porta 8000. Corrigido mapeando `"80:8000"` no serviço `web`.
+* **Falhas de lint (Flake8)**: arquivos sem quebra de linha final (`W292`), import não utilizado (`F401`) e espaços em branco sobrando (`W291`)/linhas em branco em excesso (`E303`) foram corrigidos sem alterar lógica, nomes ou testes.
+* **Valor padrão inseguro para `SECRET_KEY` e credenciais de banco**: identificado em revisão — removido; agora a ausência dessas variáveis derruba a aplicação com um erro claro em vez de rodar com um valor conhecido/inseguro.
+
+## Melhorias futuras
+
+* Integração real (ou proposta detalhada de arquitetura) com a Asaas para split de pagamento.
+* Cobertura de testes adicional para os endpoints de token JWT (expiração, refresh inválido).
+* Paginação e filtros adicionais na listagem de profissionais.

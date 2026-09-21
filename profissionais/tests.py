@@ -329,3 +329,161 @@ class ProfissionalAPITests(APITestCase):
             resposta.status_code,
             status.HTTP_400_BAD_REQUEST
         )
+
+
+class ConsultaBuscaEAutenticacaoTests(APITestCase):
+    """Cobre busca de consultas por profissional, detalhe por ID,
+    acesso sem autenticação e autenticação via JWT real."""
+
+    def setUp(self):
+        self.usuario = User.objects.create_user(
+            username="teste_busca",
+            password="SenhaTeste123"
+        )
+        self.client.force_authenticate(user=self.usuario)
+
+        resposta_profissional = self.client.post(
+            "/api/profissionais/",
+            {
+                "nome_social": "Paula Mendes",
+                "profissao": "Nutricionista",
+                "endereco": "Av. Brasil, 500",
+                "contato": "(15) 94444-4444",
+                "email": "paula.busca@email.com",
+                "registro_conselho": "CRN-11111",
+                "ativo": True
+            },
+            format="json"
+        )
+        self.profissional_id = resposta_profissional.data["id"]
+
+        resposta_consulta = self.client.post(
+            "/api/consultas/",
+            {
+                "data": "2026-10-01T09:00:00",
+                "profissional": self.profissional_id
+            },
+            format="json"
+        )
+        self.consulta_id = resposta_consulta.data["id"]
+
+    def test_buscar_consultas_por_profissional(self):
+        resposta = self.client.get(
+            f"/api/consultas/?profissional={self.profissional_id}"
+        )
+
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        self.assertTrue(len(resposta.data) >= 1)
+        for consulta in resposta.data:
+            self.assertEqual(consulta["profissional"], self.profissional_id)
+
+    def test_buscar_consultas_profissional_sem_consultas(self):
+        resposta = self.client.get("/api/consultas/?profissional=999999")
+
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resposta.data), 0)
+
+    def test_detalhar_consulta_por_id(self):
+        resposta = self.client.get(f"/api/consultas/{self.consulta_id}/")
+
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        self.assertEqual(resposta.data["id"], self.consulta_id)
+        self.assertEqual(resposta.data["profissional"], self.profissional_id)
+
+    def test_detalhar_consulta_inexistente(self):
+        resposta = self.client.get("/api/consultas/999999/")
+
+        self.assertEqual(resposta.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_listar_profissionais_sem_autenticacao_e_permitido(self):
+        self.client.force_authenticate(user=None)
+
+        resposta = self.client.get("/api/profissionais/")
+
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+
+    def test_criar_profissional_sem_autenticacao_e_bloqueado(self):
+        self.client.force_authenticate(user=None)
+
+        resposta = self.client.post(
+            "/api/profissionais/",
+            {
+                "nome_social": "Sem Token",
+                "profissao": "Médico",
+                "endereco": "Rua X, 1",
+                "contato": "(15) 90000-0000",
+                "email": "semtoken@email.com",
+                "registro_conselho": "CRM-00000",
+                "ativo": True
+            },
+            format="json"
+        )
+
+        self.assertIn(
+            resposta.status_code,
+            [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        )
+
+    def test_criar_profissional_com_jwt_real(self):
+        self.client.force_authenticate(user=None)
+
+        resposta_token = self.client.post(
+            "/api/token/",
+            {"username": "teste_busca", "password": "SenhaTeste123"},
+            format="json"
+        )
+        self.assertEqual(resposta_token.status_code, status.HTTP_200_OK)
+        token_acesso = resposta_token.data["access"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_acesso}")
+
+        resposta = self.client.post(
+            "/api/profissionais/",
+            {
+                "nome_social": "Com JWT",
+                "profissao": "Médico",
+                "endereco": "Rua Y, 2",
+                "contato": "(15) 90001-0001",
+                "email": "comjwt@email.com",
+                "registro_conselho": "CRM-00001",
+                "ativo": True
+            },
+            format="json"
+        )
+
+        self.assertEqual(resposta.status_code, status.HTTP_201_CREATED)
+
+    def test_criar_profissional_contato_invalido(self):
+        resposta = self.client.post(
+            "/api/profissionais/",
+            {
+                "nome_social": "Contato Ruim",
+                "profissao": "Médico",
+                "endereco": "Rua Z, 3",
+                "contato": "abc",
+                "email": "contatoruim@email.com",
+                "registro_conselho": "CRM-99998",
+                "ativo": True
+            },
+            format="json"
+        )
+
+        self.assertEqual(resposta.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_criar_consulta_com_profissional_inativo(self):
+        self.client.patch(
+            f"/api/profissionais/{self.profissional_id}/",
+            {"ativo": False},
+            format="json"
+        )
+
+        resposta = self.client.post(
+            "/api/consultas/",
+            {
+                "data": "2026-10-05T10:00:00",
+                "profissional": self.profissional_id
+            },
+            format="json"
+        )
+
+        self.assertEqual(resposta.status_code, status.HTTP_400_BAD_REQUEST)
